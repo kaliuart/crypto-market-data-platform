@@ -5,6 +5,7 @@ import logging
 from datetime import datetime
 from datetime import UTC
 from mappers import create_aggregated_trade_events
+from serializers import serialize_aggregated_trade_event
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
 from websockets.asyncio.client import connect
@@ -81,8 +82,8 @@ def check_trade_sequence(
     return current_id, True
 
 
-def process_message(data: dict) -> None:
-    print(data)
+def process_message(message: dict) -> None:
+    print(message.decode("utf-8"))
 
 
 async def main() -> None:
@@ -96,9 +97,10 @@ async def main() -> None:
 
                 if data is None:
                     continue
-                
+
                 received_at = datetime.now(UTC)
                 trade_event = create_aggregated_trade_events(data, received_at)
+                message_bytes = serialize_aggregated_trade_event(trade_event)
 
                 current_id = trade_event.aggregate_trade_id
 
@@ -108,7 +110,7 @@ async def main() -> None:
                 )
 
                 if should_process:
-                    process_message(trade_event)     
+                    process_message(message_bytes)     
 
         except ConnectionClosed as error:
             logger.warning("WebSocket connection lost: %s", error)            
