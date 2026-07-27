@@ -2,6 +2,8 @@ import asyncio
 import json
 import logging
 
+from datetime import datetime
+from datetime import UTC
 from mappers import create_aggregated_trade_events
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
@@ -94,9 +96,12 @@ async def main() -> None:
 
                 if data is None:
                     continue
+                
+                received_at = datetime.now(UTC)
+                trade_event = create_aggregated_trade_events(data, received_at)
 
-                trade_event = create_aggregated_trade_events(data)
                 current_id = trade_event.aggregate_trade_id
+
                 previous_id, should_process = check_trade_sequence(
                     previous_id,
                     current_id,
