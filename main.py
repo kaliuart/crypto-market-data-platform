@@ -7,14 +7,21 @@ from datetime import UTC
 from aiokafka import AIOKafkaProducer
 from mappers import create_aggregated_trade_event
 from serializers import serialize_aggregated_trade_event
-from metrics import calculate_metrics
-from metrics import observe_trade_metrics
+
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
 from time import perf_counter
-from metrics import (MESSAGES_RECEIVED,QUEUE_SIZE, TRADES_PUBLISHED, observe_trade_metrics, start_metrics_server,)
+
+from metrics import (
+    MESSAGES_RECEIVED,
+    QUEUE_SIZE,
+    TRADES_PUBLISHED,
+    calculate_metrics,
+    observe_trade_metrics,
+    start_metrics_server,
+)
 
 logging.basicConfig(
     level=logging.INFO,
