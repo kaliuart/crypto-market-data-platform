@@ -7,11 +7,14 @@ from datetime import UTC
 from aiokafka import AIOKafkaProducer
 from mappers import create_aggregated_trade_event
 from serializers import serialize_aggregated_trade_event
+from metrics import calculate_metrics
+from metrics import observe_trade_metrics
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
 from time import perf_counter
+from metrics import (MESSAGES_RECEIVED,QUEUE_SIZE, TRADES_PUBLISHED, observe_trade_metrics, start_metrics_server,)
 
 logging.basicConfig(
     level=logging.INFO,
@@ -112,7 +115,7 @@ async def handle_message(
     received_at: datetime
 ) -> int | None:    
 
-    message_processing_started = perf_counter()
+    processing_started = perf_counter()
     
     data = parse_and_validate_message(message)
     
@@ -122,14 +125,6 @@ async def handle_message(
                 
     trade_event = create_aggregated_trade_event(data, received_at)
 
-    trade_to_event_ms = (
-        trade_event.event_time - trade_event.trade_time
-    ).total_seconds() * 1000
-
-    event_to_collector_ms = (
-        trade_event.received_at - trade_event.event_time
-    ).total_seconds() * 1000
-    
     current_id = trade_event.aggregate_trade_id
     
     next_previous_id, should_process = check_trade_sequence(previous_id, current_id,)
@@ -142,46 +137,25 @@ async def handle_message(
     
     send_started = perf_counter()
 
-    collector_processing_ms = (
-        send_started - message_processing_started
-    ) * 1000
-    
-    metadata = await producer.send_and_wait(
+    await producer.send_and_wait(
         topic=KAFKA_TOPIC,
         key=trade_event.symbol.encode("utf-8"),
         value=message_bytes,
     )
 
-    kafka_ack_latency_ms = (
-        perf_counter() - send_started
-    ) * 1000
-
+    send_finished = perf_counter()
     kafka_acknowledged_at = datetime.now(UTC)
 
-    exchange_to_collector_ms = (
-        trade_event.received_at - trade_event.trade_time
-    ).total_seconds() * 1000
-
-    exchange_to_kafka_ms = (
-        kafka_acknowledged_at - trade_event.trade_time
-    ).total_seconds() * 1000
-
-    logger.info(
-        "Trade sent to Kafka: trade_id=%d, "
-        "partition=%d, offset=%d, "
-        "exchange_to_collector_ms=%.2f, "
-        "collector_processing_ms=%.2f, "
-        "kafka_ack_latency_ms=%.2f, "
-        "exchange_to_kafka_ms=%.2f",
-        trade_event.aggregate_trade_id,
-        metadata.partition,
-        metadata.offset,
-        exchange_to_collector_ms,
-        collector_processing_ms,
-        kafka_ack_latency_ms,
-        exchange_to_kafka_ms,
-
-    )
+    metrics = calculate_metrics(
+        trade_event, 
+        processing_started=processing_started, 
+        send_started=send_started, 
+        send_finished=send_finished, 
+        kafka_acknowledged_at=kafka_acknowledged_at
+        )
+    
+    TRADES_PUBLISHED.inc()
+    observe_trade_metrics(metrics)
 
     return next_previous_id
 
@@ -194,6 +168,8 @@ async def receive_messages(
         try:
             async for message in websocket:
                 received_at = datetime.now(UTC)
+
+                MESSAGES_RECEIVED.inc()
 
                 await queue.put((message, received_at))
 
@@ -210,15 +186,19 @@ async def publish_messages(
 
     while True:
         message, received_at = await queue.get()
-
-        previous_id = await handle_message(message,producer, previous_id, received_at)
-
-        queue.task_done()
+        try:
+            previous_id = await handle_message(message,producer, previous_id, received_at)
+        finally:
+            queue.task_done()
 
 
 async def main() -> None:
 
     queue: asyncio.Queue[QueueItem] = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
+
+    QUEUE_SIZE.set_function(queue.qsize)
+
+    start_metrics_server()
 
     producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,)
 

@@ -57,6 +57,18 @@ services:
 
     depends_on:
       - kafka
+  
+  prometheus:
+    image: prom/prometheus:v3.13.1
+    container_name: prometheus
+    ports:
+      - "9090:9090"
+    volumes:
+      - ./prometheus/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - prometheus-data:/prometheus
+    command:
+      - --config.file=/etc/prometheus/prometheus.yml
+      - --storage.tsdb.path=/prometheus
 
 volumes:
   kafka-data:

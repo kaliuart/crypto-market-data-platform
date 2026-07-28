@@ -1,4 +1,4 @@
-from mappers import create_aggregated_trade_events
+from mappers import create_aggregated_trade_event
 from datetime import UTC
 from datetime import datetime
 from decimal import Decimal
@@ -6,7 +6,7 @@ from decimal import Decimal
 def test_maps_binance_fields_to_trade_event():
     data = {"e": "aggTrade", "E": 1785161328336, "s": "BTCUSDT", "a": 4023160398, "p": "65340.00000000", "q": "0.00765000", "f": 6536456692, "l": 6536456693, "T": 1785161328335, "m": True, "M": True}
     received_at = datetime.now(UTC)
-    trade_event = create_aggregated_trade_events(data, received_at)
+    trade_event = create_aggregated_trade_event(data, received_at)
 
     assert trade_event.aggregate_trade_id == 4023160398 
     assert trade_event.first_trade_id == 6536456692
@@ -17,7 +17,7 @@ def test_maps_binance_fields_to_trade_event():
 
 def test_converts_price_and_quantity_to_decimal():
     data = {"e": "aggTrade", "E": 1785161328336, "s": "BTCUSDT", "a": 4023160398, "p": "65340.00000000", "q": "0.00765000", "f": 6536456692, "l": 6536456693, "T": 1785161328335, "m": True, "M": True}
-    trade_event = create_aggregated_trade_events(data, datetime.now(UTC))
+    trade_event = create_aggregated_trade_event(data, datetime.now(UTC))
 
     assert trade_event.price == Decimal("65340.00000000")
     assert trade_event.quantity == Decimal("0.00765000")
@@ -27,7 +27,7 @@ def test_converts_price_and_quantity_to_decimal():
 
 def test_converts_millisecond_timestamps_to_utc_datetime():
     data = {"e": "aggTrade", "E": 1785161328336, "s": "BTCUSDT", "a": 4023160398, "p": "65340.00000000", "q": "0.00765000", "f": 6536456692, "l": 6536456693, "T": 1785161328335, "m": True, "M": True}
-    trade_event = create_aggregated_trade_events(data, datetime.now(UTC))
+    trade_event = create_aggregated_trade_event(data, datetime.now(UTC))
 
     assert isinstance(trade_event.event_time, datetime)
     assert isinstance(trade_event.trade_time, datetime)
