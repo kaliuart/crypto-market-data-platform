@@ -2,7 +2,7 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from models import AggregatedTradeEvent
 
-def create_aggregated_trade_events(data: dict, received_at: datetime)-> AggregatedTradeEvent:
+def create_aggregated_trade_event(data: dict, received_at: datetime)-> AggregatedTradeEvent:
     return AggregatedTradeEvent(
         aggregate_trade_id=data["a"],
         symbol=data["s"],

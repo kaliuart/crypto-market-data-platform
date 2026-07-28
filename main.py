@@ -4,12 +4,14 @@ import logging
 
 from datetime import datetime
 from datetime import UTC
-from mappers import create_aggregated_trade_events
+from aiokafka import AIOKafkaProducer
+from mappers import create_aggregated_trade_event
 from serializers import serialize_aggregated_trade_event
 from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
+from time import perf_counter
 
 logging.basicConfig(
     level=logging.INFO,
@@ -20,12 +22,28 @@ AGGREGATED_TRADE_SCHEMA = {
     "type": "object",
     "properties": {
         "e": {"const": "aggTrade"},
-        "a": {"type": "integer"},
+        "E": {"type": "integer"},
         "s": {"type": "string"},
+        "a": {"type": "integer"},
         "p": {"type": "string"},
         "q": {"type": "string"},
+        "f": {"type": "integer"},
+        "l": {"type": "integer"},
+        "T": {"type": "integer"},
+        "m": {"type": "boolean"},
     },
-    "required": ["e", "a", "s", "p", "q"],
+    "required": [
+        "e",
+        "E",
+        "s",
+        "a",
+        "p",
+        "q",
+        "f",
+        "l",
+        "T",
+        "m",
+    ],
 }
 
 logger = logging.getLogger(__name__)
@@ -34,6 +52,11 @@ AGGREGATED_TRADE_VALIDATOR  = Draft202012Validator(AGGREGATED_TRADE_SCHEMA)
 
 BINANCE_WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@aggTrade"
 
+KAFKA_BOOTSTRAP_SERVERS = "localhost:9092"
+KAFKA_TOPIC = "binance.aggregated-trades.v1"
+
+QUEUE_MAX_SIZE = 1000
+QueueItem = tuple[str, datetime]
 
 def parse_and_validate_message(
     message: str,
@@ -82,39 +105,140 @@ def check_trade_sequence(
     return current_id, True
 
 
-def process_message(message: dict) -> None:
-    print(message.decode("utf-8"))
+async def handle_message(
+    message: str,
+    producer: AIOKafkaProducer,
+    previous_id: int | None,
+    received_at: datetime
+) -> int | None:    
 
+    message_processing_started = perf_counter()
+    
+    data = parse_and_validate_message(message)
+    
+    if data is None:
+        return previous_id
+    
+                
+    trade_event = create_aggregated_trade_event(data, received_at)
 
-async def main() -> None:
-    previous_id = None
+    trade_to_event_ms = (
+        trade_event.event_time - trade_event.trade_time
+    ).total_seconds() * 1000
+
+    event_to_collector_ms = (
+        trade_event.received_at - trade_event.event_time
+    ).total_seconds() * 1000
+    
+    current_id = trade_event.aggregate_trade_id
+    
+    next_previous_id, should_process = check_trade_sequence(previous_id, current_id,)
+                
+    
+    if not should_process:
+        return previous_id
+    
+    message_bytes = serialize_aggregated_trade_event(trade_event)
+    
+    send_started = perf_counter()
+
+    collector_processing_ms = (
+        send_started - message_processing_started
+    ) * 1000
+    
+    metadata = await producer.send_and_wait(
+        topic=KAFKA_TOPIC,
+        key=trade_event.symbol.encode("utf-8"),
+        value=message_bytes,
+    )
+
+    kafka_ack_latency_ms = (
+        perf_counter() - send_started
+    ) * 1000
+
+    kafka_acknowledged_at = datetime.now(UTC)
+
+    exchange_to_collector_ms = (
+        trade_event.received_at - trade_event.trade_time
+    ).total_seconds() * 1000
+
+    exchange_to_kafka_ms = (
+        kafka_acknowledged_at - trade_event.trade_time
+    ).total_seconds() * 1000
+
+    logger.info(
+        "Trade sent to Kafka: trade_id=%d, "
+        "partition=%d, offset=%d, "
+        "exchange_to_collector_ms=%.2f, "
+        "collector_processing_ms=%.2f, "
+        "kafka_ack_latency_ms=%.2f, "
+        "exchange_to_kafka_ms=%.2f",
+        trade_event.aggregate_trade_id,
+        metadata.partition,
+        metadata.offset,
+        exchange_to_collector_ms,
+        collector_processing_ms,
+        kafka_ack_latency_ms,
+        exchange_to_kafka_ms,
+
+    )
+
+    return next_previous_id
+
+async def receive_messages(
+        queue: asyncio.Queue[QueueItem]
+) -> None:
     async for websocket in connect(BINANCE_WS_URL):
         logger.info("Connected to Binance WebSocket")
 
         try:
             async for message in websocket:
-                data = parse_and_validate_message(message)
-
-                if data is None:
-                    continue
-
                 received_at = datetime.now(UTC)
-                trade_event = create_aggregated_trade_events(data, received_at)
-                message_bytes = serialize_aggregated_trade_event(trade_event)
 
-                current_id = trade_event.aggregate_trade_id
-
-                previous_id, should_process = check_trade_sequence(
-                    previous_id,
-                    current_id,
-                )
-
-                if should_process:
-                    process_message(message_bytes)     
+                await queue.put((message, received_at))
 
         except ConnectionClosed as error:
             logger.warning("WebSocket connection lost: %s", error)            
             continue
+
+
+async def publish_messages(
+        queue: asyncio.Queue[QueueItem],
+        producer: AIOKafkaProducer,
+) -> None:
+    previous_id: int | None = None
+
+    while True:
+        message, received_at = await queue.get()
+
+        previous_id = await handle_message(message,producer, previous_id, received_at)
+
+        queue.task_done()
+
+
+async def main() -> None:
+
+    queue: asyncio.Queue[QueueItem] = asyncio.Queue(maxsize=QUEUE_MAX_SIZE)
+
+    producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,)
+
+    await producer.start()
+    
+    try:
+        async with asyncio.TaskGroup() as task_group:
+
+            task_group.create_task(
+                receive_messages(queue),
+                name="binance-receiver",
+            )
+
+            task_group.create_task(
+                publish_messages(queue, producer),
+                name="kafka-publisher",
+            )
+
+    finally:
+        await producer.stop()
 
 
 if __name__ == "__main__":
