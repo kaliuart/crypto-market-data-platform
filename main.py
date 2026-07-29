@@ -66,7 +66,7 @@ KAFKA_BOOTSTRAP_SERVERS = "localhost:9092"
 KAFKA_TOPIC = "binance.aggregated-trades.v1"
 
 QUEUE_MAX_SIZE = 1000
-QueueItem = tuple[str, datetime]
+QueueItem = tuple[str, datetime, float]
 
 def parse_and_validate_message(
     message: str,
@@ -119,7 +119,8 @@ async def handle_message(
     message: str,
     producer: AIOKafkaProducer,
     previous_id: int | None,
-    received_at: datetime
+    received_at: datetime,
+    queued_at: float
 ) -> int | None:    
 
     processing_started = perf_counter()
@@ -158,7 +159,8 @@ async def handle_message(
         processing_started=processing_started, 
         send_started=send_started, 
         send_finished=send_finished, 
-        kafka_acknowledged_at=kafka_acknowledged_at
+        kafka_acknowledged_at=kafka_acknowledged_at,
+        queued_at=queued_at,
         )
     
     TRADES_PUBLISHED.inc()
@@ -178,7 +180,8 @@ async def receive_messages(
 
                 MESSAGES_RECEIVED.inc()
 
-                await queue.put((message, received_at))
+                queued_at = perf_counter()
+                await queue.put((message, received_at, queued_at))
 
         except ConnectionClosed as error:
             logger.warning("WebSocket connection lost: %s", error)            
@@ -192,9 +195,9 @@ async def publish_messages(
     previous_id: int | None = None
 
     while True:
-        message, received_at = await queue.get()
+        message, received_at, queued_at = await queue.get()
         try:
-            previous_id = await handle_message(message,producer, previous_id, received_at)
+            previous_id = await handle_message(message,producer, previous_id, received_at, queued_at)
         finally:
             queue.task_done()
 

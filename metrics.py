@@ -11,9 +11,11 @@ class TradeMetrics:
     trade_to_event_seconds: float
     event_to_collector_seconds: float
     exchange_to_collector_seconds: float
+    queue_wait_seconds: float
     collector_processing_seconds: float
     kafka_ack_latency_seconds: float
     exchange_to_kafka_seconds: float
+
 
 def calculate_metrics(
     trade_event: AggregatedTradeEvent,
@@ -22,6 +24,7 @@ def calculate_metrics(
     send_started: float,
     send_finished: float,
     kafka_acknowledged_at: datetime,
+    queued_at: float
 ) -> TradeMetrics:
     return TradeMetrics(
         trade_to_event_seconds=(
@@ -41,7 +44,10 @@ def calculate_metrics(
         ),
         exchange_to_kafka_seconds=(
             kafka_acknowledged_at - trade_event.trade_time
-        ).total_seconds()
+        ).total_seconds(),
+        queue_wait_seconds=(
+            processing_started - queued_at
+        ),
     )
 
 MESSAGES_RECEIVED = Counter(
@@ -100,6 +106,7 @@ def observe_trade_metrics(metrics: TradeMetrics) -> None:
         "collector_processing": metrics.collector_processing_seconds,
         "kafka_ack": metrics.kafka_ack_latency_seconds,
         "exchange_to_kafka": metrics.exchange_to_kafka_seconds,
+        "queue_wait": metrics.queue_wait_seconds,
     }
 
     for stage, duration_seconds in stage_durations.items():

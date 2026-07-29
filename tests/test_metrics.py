@@ -38,6 +38,7 @@ def test_calculate_metrics_returns_durations_in_seconds() -> None:
         kafka_acknowledged_at=datetime(
             2026, 7, 29, 10, 0, 0, 132_000, tzinfo=UTC
         ),
+        queued_at=9.998,
     )
 
     assert metrics.trade_to_event_seconds == pytest.approx(0.001)
@@ -46,7 +47,7 @@ def test_calculate_metrics_returns_durations_in_seconds() -> None:
     assert metrics.collector_processing_seconds == pytest.approx(0.0004)
     assert metrics.kafka_ack_latency_seconds == pytest.approx(0.003)
     assert metrics.exchange_to_kafka_seconds == pytest.approx(0.132)
-
+    assert metrics.queue_wait_seconds == pytest.approx(0.002)
 
 def test_calculate_metrics_returns_float_values() -> None:
     metrics = calculate_metrics(
@@ -57,6 +58,7 @@ def test_calculate_metrics_returns_float_values() -> None:
         kafka_acknowledged_at=datetime(
             2026, 7, 29, 10, 0, 0, 132_000, tzinfo=UTC
         ),
+        queued_at=9.998,
     )
 
     assert all(
@@ -68,6 +70,7 @@ def test_calculate_metrics_returns_float_values() -> None:
             metrics.collector_processing_seconds,
             metrics.kafka_ack_latency_seconds,
             metrics.exchange_to_kafka_seconds,
+            metrics.queue_wait_seconds,
         )
     )
 
@@ -80,6 +83,7 @@ def test_observe_trade_metrics_records_each_pipeline_stage() -> None:
         collector_processing_seconds=0.0004,
         kafka_ack_latency_seconds=0.003,
         exchange_to_kafka_seconds=0.132,
+        queue_wait_seconds=0.002,
     )
 
     expected_durations = {
@@ -89,6 +93,7 @@ def test_observe_trade_metrics_records_each_pipeline_stage() -> None:
         "collector_processing": 0.0004,
         "kafka_ack": 0.003,
         "exchange_to_kafka": 0.132,
+        "queue_wait": 0.002,
     }
 
     before = {
