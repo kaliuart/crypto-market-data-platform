@@ -42,7 +42,6 @@ services:
 
     volumes:
       - kafka-data:/var/lib/kafka/data
-
   kafbat-ui:
     image: ghcr.io/kafbat/kafka-ui:latest
     container_name: kafbat-ui
@@ -57,7 +56,6 @@ services:
 
     depends_on:
       - kafka
-  
   prometheus:
     image: prom/prometheus:v3.13.1
     container_name: prometheus
@@ -72,7 +70,6 @@ services:
     command:
       - --config.file=/etc/prometheus/prometheus.yml
       - --storage.tsdb.path=/prometheus
-  
   grafana:
     image: grafana/grafana:13.1.0
     container_name: grafana
@@ -82,8 +79,17 @@ services:
       - grafana-data:/var/lib/grafana
     depends_on:
       - prometheus
+  clickhouse:
+    image: clickhouse/clickhouse-server:26.3
+    container_name: clickhouse
+    ports:
+      - "8123:8123"
+      - "9000:9000"
+    volumes:
+      - clickhouse-data:/var/lib/clickhouse
 
 volumes:
   kafka-data:
   prometheus-data:
   grafana-data:
+  clickhouse-data:
