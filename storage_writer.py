@@ -6,6 +6,7 @@ import os
 from aiokafka import AIOKafkaConsumer
 import clickhouse_connect
 from mappers import map_to_clickhouse_row
+from decimal import InvalidOperation
 
 KAFKA_BOOTSTRAP_SERVERS = "localhost:9092"
 KAFKA_TOPIC = "binance.aggregated-trades.v1"
@@ -22,7 +23,8 @@ logger = logging.getLogger(__name__)
 
 CLICKHOUSE_PASSWORD = os.environ["CLICKHOUSE_PASSWORD"]
 
-async def consume_messages(clickhouse_client: clickhouse_connect) -> None:
+
+async def start_kafka_consumer() -> AIOKafkaConsumer:
 
     consumer = AIOKafkaConsumer(
         KAFKA_TOPIC,
@@ -33,19 +35,57 @@ async def consume_messages(clickhouse_client: clickhouse_connect) -> None:
     )
 
     await consumer.start()
+
     logger.info(
         "Kafka consumer started: topic=%s group=%s",
         KAFKA_TOPIC,
         CONSUMER_GROUP_ID,
     )
 
+def parse_and_validate_kafka_message(message: bytes) -> dict:
     try:
-        async for message in consumer:
-            data = json.loads(message.value.decode("UTF-8"))
+        data = json.loads(message.value.decode("utf-8"))
 
-            row = map_to_clickhouse_row(data, message.partition, message.offset)
+        row = map_to_clickhouse_row(data)
 
-            print(row)
+    except (
+        UnicodeDecodeError,
+        json.JSONDecodeError,
+        KeyError,
+        TypeError,
+        ValueError,
+        InvalidOperation,
+    ) as error:
+        logger.error(
+            "Invalid Kafka message: partition=%s offset=%s error=%s",
+            message.partition,
+            message.offset,
+            error,
+        )
+        return None
+    return row
+        
+
+async def consume_messages(clickhouse_client: clickhouse_connect) -> None:
+    consumer = start_kafka_consumer()
+
+    try:
+        while True:
+            records_by_partition = await consumer.getmany(
+                timeout_ms=1000,
+                max_records=100,
+            )
+            batch = []
+            for partition, messages in records_by_partition.items():
+                for message in messages:
+
+                    row = parse_and_validate_kafka_message(message)
+
+                    if row is not None:
+                        batch.append(row)
+
+            await clickhouse_client.insert_batch()
+                
 
     finally:
         await consumer.stop()

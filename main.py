@@ -1,5 +1,4 @@
 import asyncio
-import json
 import logging
 
 from datetime import datetime
@@ -7,12 +6,11 @@ from datetime import UTC
 from aiokafka import AIOKafkaProducer
 from mappers import create_aggregated_trade_event
 from serializers import serialize_aggregated_trade_event
-
-from jsonschema import Draft202012Validator
-from jsonschema.exceptions import ValidationError
+from validators import parse_and_validate_message
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
 from time import perf_counter
+from exceptions import InvalidTradeMessage
 
 from metrics import (
     MESSAGES_RECEIVED,
@@ -28,37 +26,9 @@ logging.basicConfig(
     format="%(asctime)s | %(levelname)s | %(message)s",
 )
 
-AGGREGATED_TRADE_SCHEMA = {
-    "type": "object",
-    "properties": {
-        "e": {"const": "aggTrade"},
-        "E": {"type": "integer"},
-        "s": {"type": "string"},
-        "a": {"type": "integer"},
-        "p": {"type": "string"},
-        "q": {"type": "string"},
-        "f": {"type": "integer"},
-        "l": {"type": "integer"},
-        "T": {"type": "integer"},
-        "m": {"type": "boolean"},
-    },
-    "required": [
-        "e",
-        "E",
-        "s",
-        "a",
-        "p",
-        "q",
-        "f",
-        "l",
-        "T",
-        "m",
-    ],
-}
 
 logger = logging.getLogger(__name__)
 
-AGGREGATED_TRADE_VALIDATOR  = Draft202012Validator(AGGREGATED_TRADE_SCHEMA)
 
 BINANCE_WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@aggTrade"
 
@@ -67,21 +37,6 @@ KAFKA_TOPIC = "binance.aggregated-trades.v1"
 
 QUEUE_MAX_SIZE = 1000
 QueueItem = tuple[str, datetime, float]
-
-def parse_and_validate_message(
-    message: str,
-) -> dict | None:
-    try:
-        data = json.loads(message)
-        AGGREGATED_TRADE_VALIDATOR.validate(data)
-    except json.JSONDecodeError as error:
-        logger.warning("Invalid JSON %s", error)
-        return None
-    except ValidationError as error:
-        logger.warning("Invalid message structure: %s", error.message)
-        return None
-
-    return data
 
 
 def check_trade_sequence(
@@ -115,7 +70,7 @@ def check_trade_sequence(
     return current_id, True
 
 
-async def handle_message(
+async def process_and_publish_message(
     message: str,
     producer: AIOKafkaProducer,
     previous_id: int | None,
@@ -124,20 +79,24 @@ async def handle_message(
 ) -> int | None:    
 
     processing_started = perf_counter()
-    
-    data = parse_and_validate_message(message)
-    
-    if data is None:
+
+    try:
+        data = parse_and_validate_message(message)
+
+        trade_event = create_aggregated_trade_event(data, received_at)
+    except InvalidTradeMessage as error:
+        logger.warning(
+        "Skipping invalid Binance message: %s",
+        error,
+        )
+
         return previous_id
-    
-                
-    trade_event = create_aggregated_trade_event(data, received_at)
+     
 
     current_id = trade_event.aggregate_trade_id
     
     next_previous_id, should_process = check_trade_sequence(previous_id, current_id,)
                 
-    
     if not should_process:
         return previous_id
     
@@ -197,7 +156,13 @@ async def publish_messages(
     while True:
         message, received_at, queued_at = await queue.get()
         try:
-            previous_id = await handle_message(message,producer, previous_id, received_at, queued_at)
+            previous_id = await process_and_publish_message(
+                message=message,
+                producer=producer,
+                previous_id=previous_id,
+                received_at=received_at,
+                queued_at=queued_at,
+            )
         finally:
             queue.task_done()
 
@@ -236,3 +201,4 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Application stopped by user")
+    
