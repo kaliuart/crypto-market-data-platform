@@ -3,10 +3,13 @@ import json
 import logging
 import os
 
+
+from models import ClickHouseTradeRow
 from aiokafka import AIOKafkaConsumer
+from exceptions import InvalidTradeMessage
 import clickhouse_connect
-from mappers import map_to_clickhouse_row
-from decimal import InvalidOperation
+from mappers import (map_to_clickhouse_row, row_to_clickhouse_values)
+from validators import parse_and_validate_kafka_message
 
 KAFKA_BOOTSTRAP_SERVERS = "localhost:9092"
 KAFKA_TOPIC = "binance.aggregated-trades.v1"
@@ -22,7 +25,21 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 CLICKHOUSE_PASSWORD = os.environ["CLICKHOUSE_PASSWORD"]
-
+CLICKHOUSE_TABLE_NAME = "agg_trades"
+CLICKHOUSE_COLUMNS = [
+    "aggregate_trade_id",
+    "symbol",
+    "price",
+    "quantity",
+    "event_time",
+    "trade_time",
+    "received_at",
+    "first_trade_id",
+    "last_trade_id",
+    "buyer_is_market_maker",
+    "kafka_partition",
+    "kafka_offset",
+]
 
 async def start_kafka_consumer() -> AIOKafkaConsumer:
 
@@ -31,7 +48,7 @@ async def start_kafka_consumer() -> AIOKafkaConsumer:
         bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
         group_id=CONSUMER_GROUP_ID,
         enable_auto_commit=False,
-        auto_offset_reset="latest",
+        auto_offset_reset="earliest",
     )
 
     await consumer.start()
@@ -41,51 +58,71 @@ async def start_kafka_consumer() -> AIOKafkaConsumer:
         KAFKA_TOPIC,
         CONSUMER_GROUP_ID,
     )
+    return consumer
 
-def parse_and_validate_kafka_message(message: bytes) -> dict:
-    try:
-        data = json.loads(message.value.decode("utf-8"))
 
-        row = map_to_clickhouse_row(data)
+async def insert_trade_batch(
+        clickhouse_client,
+        batch: list,
+) -> None:
 
-    except (
-        UnicodeDecodeError,
-        json.JSONDecodeError,
-        KeyError,
-        TypeError,
-        ValueError,
-        InvalidOperation,
-    ) as error:
-        logger.error(
-            "Invalid Kafka message: partition=%s offset=%s error=%s",
-            message.partition,
-            message.offset,
-            error,
-        )
-        return None
-    return row
-        
+    data = [
+        row_to_clickhouse_values(row) for row in batch
+    ]
 
-async def consume_messages(clickhouse_client: clickhouse_connect) -> None:
-    consumer = start_kafka_consumer()
+    await clickhouse_client.insert(
+        table=CLICKHOUSE_TABLE_NAME,
+        data=data,
+        column_names=CLICKHOUSE_COLUMNS
+    )
+
+async def consume_messages(clickhouse_client) -> None:
+    consumer = await start_kafka_consumer()
 
     try:
         while True:
+
             records_by_partition = await consumer.getmany(
                 timeout_ms=1000,
                 max_records=100,
             )
-            batch = []
-            for partition, messages in records_by_partition.items():
-                for message in messages:
 
-                    row = parse_and_validate_kafka_message(message)
+            if not records_by_partition:
+                continue
+
+
+            offsets_to_commit = {}
+            batch = []
+
+            for topic_partition, messages in records_by_partition.items():
+                for message in messages:
+                    try:
+                        data = parse_and_validate_kafka_message(message)
+                        row = map_to_clickhouse_row(data)
+
+                    except InvalidTradeMessage as error:
+                            logger.warning(
+                            "Skipping invalid Binance message: %s",
+                            error,
+                            )
+                            continue
 
                     if row is not None:
                         batch.append(row)
 
-            await clickhouse_client.insert_batch()
-                
+                if messages:
+                    offsets_to_commit[topic_partition] = (
+                        messages[-1].offset + 1
+                    )
+
+            if batch:
+                await insert_trade_batch(
+                    clickhouse_client=clickhouse_client,
+                    batch=batch
+                )
+
+            if offsets_to_commit:
+                await consumer.commit(offsets_to_commit)
 
     finally:
         await consumer.stop()

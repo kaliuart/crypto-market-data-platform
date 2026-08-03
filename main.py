@@ -6,7 +6,7 @@ from datetime import UTC
 from aiokafka import AIOKafkaProducer
 from mappers import create_aggregated_trade_event
 from serializers import serialize_aggregated_trade_event
-from validators import parse_and_validate_message
+from validators import parse_and_validate_binance_message
 from websockets.asyncio.client import connect
 from websockets.exceptions import ConnectionClosed
 from time import perf_counter
@@ -81,8 +81,7 @@ async def process_and_publish_message(
     processing_started = perf_counter()
 
     try:
-        data = parse_and_validate_message(message)
-
+        data = parse_and_validate_binance_message(message)
         trade_event = create_aggregated_trade_event(data, received_at)
     except InvalidTradeMessage as error:
         logger.warning(
@@ -99,7 +98,9 @@ async def process_and_publish_message(
                 
     if not should_process:
         return previous_id
-    
+
+
+
     message_bytes = serialize_aggregated_trade_event(trade_event)
     
     send_started = perf_counter()

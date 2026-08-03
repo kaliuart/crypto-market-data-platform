@@ -1,8 +1,6 @@
 from datetime import UTC, datetime
-from decimal import Decimal
 from models import AggregatedTradeEvent
 from models import ClickHouseTradeRow
-from decimal import InvalidOperation
 from exceptions import InvalidTradeMessage
 from decimal import Decimal, InvalidOperation
 from typing import Any
@@ -98,3 +96,20 @@ def map_to_clickhouse_row(data: dict, partition:int, offset:int)-> ClickHouseTra
         raise InvalidTradeMessage(
             f"Invalid aggregated trade payload: {error}"
         ) from error
+
+
+def row_to_clickhouse_values(row) -> list:
+    return [
+        row.aggregate_trade_id,
+        row.symbol,
+        row.price,
+        row.quantity,
+        row.event_time,
+        row.trade_time,
+        row.received_at,
+        row.first_trade_id,
+        row.last_trade_id,
+        row.buyer_is_market_maker,
+        row.kafka_partition,
+        row.kafka_offset,
+    ]
