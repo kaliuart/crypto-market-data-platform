@@ -66,36 +66,59 @@ def create_aggregated_trade_event(
 
 def map_to_clickhouse_row(data: dict, partition:int, offset:int)-> ClickHouseTradeRow:
     try:
-        buyer_is_market_maker = data["buyer_is_market_maker"]
+        
+        price = Decimal(data["price"])
+        quantity = Decimal(data["quantity"])
 
-        if not isinstance(buyer_is_market_maker, bool):
-            raise TypeError(
-                "buyer_is_market_maker must be bool"
-            )
+        event_time =  datetime.fromisoformat(data["event_time"])
+        trade_time =  datetime.fromisoformat(data["trade_time"])
+        received_at = datetime.fromisoformat(data["received_at"])
 
-        return ClickHouseTradeRow(
-            aggregate_trade_id=int(data["aggregate_trade_id"]),
+        first_trade_id = int(data["first_trade_id"])
+        last_trade_id = int(data["last_trade_id"])
+        aggregated_trade_id = int(data["aggregate_trade_id"])
+
+    except (
+        InvalidOperation,
+        ValueError,
+        OverflowError,
+        OSError,
+    ) as error:
+        raise InvalidTradeMessage(
+            f"Invalid trade values: {error}"
+        ) from error
+
+    if not price.is_finite() or price <= 0:
+        raise InvalidTradeMessage(
+            "price must be finite and positive"
+        )
+
+    if not quantity.is_finite() or quantity <= 0:
+        raise InvalidTradeMessage(
+            "quantity must be finite and positive"
+        )
+
+    if first_trade_id > last_trade_id:
+        raise InvalidTradeMessage(
+            "first_trade_id must not exceed last_trade_id"
+        )
+    
+        
+    return ClickHouseTradeRow(
+            aggregate_trade_id=aggregated_trade_id,
             symbol=data["symbol"],
-            price=Decimal(data["price"]),
-            quantity=Decimal(data["quantity"]),
-            event_time=datetime.fromisoformat(data["event_time"]),
-            trade_time=datetime.fromisoformat(data["trade_time"]),
-            first_trade_id=int(data["first_trade_id"]),
-            last_trade_id=int(data["last_trade_id"]),
+            price=price,
+            quantity=quantity,
+            event_time=event_time,
+            trade_time=trade_time,
+            first_trade_id=first_trade_id,
+            last_trade_id=last_trade_id,
             buyer_is_market_maker=data["buyer_is_market_maker"],
-            received_at=datetime.fromisoformat(data["received_at"]),
+            received_at=received_at,
             kafka_partition=partition,
             kafka_offset=offset,
         )
-    except (
-        KeyError,
-        TypeError,
-        ValueError,
-        InvalidOperation,
-    ) as error:
-        raise InvalidTradeMessage(
-            f"Invalid aggregated trade payload: {error}"
-        ) from error
+
 
 
 def row_to_clickhouse_values(row) -> list:

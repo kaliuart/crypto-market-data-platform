@@ -102,7 +102,7 @@ async def consume_messages(clickhouse_client) -> None:
 
                     except InvalidTradeMessage as error:
                             logger.warning(
-                            "Skipping invalid Binance message: %s",
+                            "Skipping invalid Kafka message: %s",
                             error,
                             )
                             continue
