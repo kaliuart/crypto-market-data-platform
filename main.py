@@ -202,4 +202,7 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Application stopped by user")
+    except Exception:
+        logger.exception("Storage writer stopped because of infrastructure failure")
+        raise
     

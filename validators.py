@@ -49,8 +49,14 @@ AGGREGATED_TRADE_SCHEMA_BINANCE = {
 AGGREGATED_TRADE_SCHEMA_KAFKA = {
     "type": "object",
     "properties": {
-        "price": {"type": "string"},
-        "quantity": {"type": "string"},
+        "price": {
+            "type": "string",
+            "minLength": 1,
+        },
+        "quantity": {
+            "type": "string",
+            "minLength": 1,
+        },
         "buyer_is_market_maker" : {"type": "boolean"},
         "symbol": {
             "type": "string",

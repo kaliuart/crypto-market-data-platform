@@ -1,5 +1,4 @@
 import asyncio
-import json
 import logging
 import os
 
@@ -107,8 +106,10 @@ async def consume_messages(clickhouse_client) -> None:
 
                     except InvalidTradeMessage as error:
                             logger.warning(
-                            "Skipping invalid Kafka message: %s",
-                            error,
+                                "Skipping invalid Kafka message: partition=%s offset=%s error=%s",
+                                message.partition,
+                                message.offset,
+                                error,
                             )
                             continue
 
@@ -151,3 +152,6 @@ if __name__ == "__main__":
         asyncio.run(main())
     except KeyboardInterrupt:
         logger.info("Storage writer stopped by user")
+    except Exception:
+        logger.exception("Сollector stopped because of infrastructure failure")
+        raise
