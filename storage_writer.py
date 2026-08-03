@@ -113,8 +113,7 @@ async def consume_messages(clickhouse_client) -> None:
                             )
                             continue
 
-                    if row is not None:
-                        batch.append(row)
+                    batch.append(row)
 
                 if messages:
                     offsets_to_commit[topic_partition] = (
@@ -153,5 +152,5 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logger.info("Storage writer stopped by user")
     except Exception:
-        logger.exception("Сollector stopped because of infrastructure failure")
+        logger.exception("Storage writer stopped because of infrastructure failure")
         raise

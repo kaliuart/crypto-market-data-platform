@@ -8,9 +8,9 @@ CREATE TABLE IF NOT EXISTS market_data.agg_trades
     price Decimal(18, 8),
     quantity Decimal(18, 8),
 
-    event_time DateTime(3, 'UTC'),
-    trade_time DateTime(3, 'UTC'),
-    received_at DateTime(3, 'UTC'),
+    event_time DateTime64(3, 'UTC'),
+    trade_time DateTime64(3, 'UTC'),
+    received_at DateTime64(3, 'UTC'),
 
     first_trade_id UInt64,
     last_trade_id UInt64,

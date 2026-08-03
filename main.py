@@ -176,7 +176,10 @@ async def main() -> None:
 
     start_metrics_server()
 
-    producer = AIOKafkaProducer(bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,)
+    producer = AIOKafkaProducer(
+        bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
+        enable_idempotence=True,
+        )
 
     await producer.start()
     
@@ -203,6 +206,6 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logger.info("Application stopped by user")
     except Exception:
-        logger.exception("Storage writer stopped because of infrastructure failure")
+        logger.exception("Collector stopped because of infrastructure failure")
         raise
     
