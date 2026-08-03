@@ -98,7 +98,12 @@ async def consume_messages(clickhouse_client) -> None:
                 for message in messages:
                     try:
                         data = parse_and_validate_kafka_message(message)
-                        row = map_to_clickhouse_row(data)
+                        row = map_to_clickhouse_row(
+                            data=data,
+                            partition=message.partition,
+                            offset=message.offset
+                        )
+                        
 
                     except InvalidTradeMessage as error:
                             logger.warning(

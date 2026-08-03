@@ -69,15 +69,15 @@ AGGREGATED_TRADE_SCHEMA_KAFKA = {
             "minimum": 0,
         },
         "event_time": {
-            "type": "integer",
+            "type": "string",
             "minimum": 0,
         },
         "trade_time": {
-            "type": "integer",
+            "type": "string",
             "minimum": 0,
         },
         "received_at": {
-            "type": "integer",
+            "type": "string",
             "minimum": 0,
         }
     },
@@ -104,7 +104,7 @@ def parse_and_validate_binance_message(
 
     try:
         data = json.loads(message)
-        AGGREGATED_TRADE_VALIDATOR_BINANCE.validate(data)
+        AGGREGATED_TRADE_VALIDATOR_KAFKA.validate(data)
         return data
     except (json.JSONDecodeError, ValidationError) as error:
         raise InvalidTradeMessage(f"Invalid Binance message: {error}") from error
@@ -117,10 +117,12 @@ def parse_and_validate_kafka_message(message) -> dict:
         raise InvalidTradeMessage
 
     try:
-        data = json.loads(message)
+        data = json.loads(message.value.decode("utf-8"))
         AGGREGATED_TRADE_SCHEMA_KAFKA.validate(data)
+        return data
     except (
         UnicodeDecodeError,
         json.JSONDecodeError,
+        ValidationError
     ) as error:
         raise InvalidTradeMessage(f"Invalid Kafka message: {error}")
