@@ -115,7 +115,7 @@ async def consume_messages(clickhouse_client) -> None:
                             partition=message.partition,
                             offset=message.offset
                         )
-                        
+                        print(data)
 
                     except InvalidTradeMessage as error:
                             INVALID_MESSAGES.inc()

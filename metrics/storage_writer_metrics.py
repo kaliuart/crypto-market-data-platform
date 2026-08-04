@@ -1,4 +1,4 @@
-from prometheus_client import Counter, Gauge, Histogram, start_http_server
+from prometheus_client import Counter, Histogram, start_http_server
 
 METRICS_PORT = 8001
 METRICS_NAMESPACE = "crypto_storage_writer"
@@ -22,6 +22,8 @@ CONSUMED_MESSAGES = Counter(
 INVALID_MESSAGES = Counter(
     "invalid_messages",
     "Number of invalid Kafka messages skipped",
+    namespace=METRICS_NAMESPACE,
+
 )
 
 TRADES_INSERTED = Counter(
@@ -53,14 +55,39 @@ CLICKHOUSE_INSERT_DURATION = Histogram(
     "clickhouse_insert_duration_seconds",
     "Duration of ClickHouse batch inserts",
     namespace=METRICS_NAMESPACE,
-    buckets=(0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5),
+    buckets=(
+        0.005,
+        0.010,
+        0.025,
+        0.050,
+        0.075,
+        0.100,
+        0.150,
+        0.200,
+        0.250,
+        0.350,
+        0.500,
+        1.000,
+    ),
 )
 
 KAFKA_COMMIT_DURATION = Histogram(
     "kafka_commit_duration_seconds",
     "Duration of Kafka offset commits",
     namespace=METRICS_NAMESPACE,
-    buckets=(0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1),
+    buckets=(
+        0.0005,
+        0.001,
+        0.002,
+        0.003,
+        0.004,
+        0.005,
+        0.0075,
+        0.010,
+        0.025,
+        0.050,
+        0.100,
+    ),
 )
 
 

@@ -84,6 +84,7 @@ async def process_and_publish_message(
     try:
         data = parse_and_validate_binance_message(message)
         trade_event = create_aggregated_trade_event(data, received_at)
+        print(data)
     except InvalidTradeMessage as error:
         logger.warning(
         "Skipping invalid Binance message: %s",
