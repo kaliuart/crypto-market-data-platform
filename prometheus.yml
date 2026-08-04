@@ -6,3 +6,8 @@ scrape_configs:
     static_configs:
       - targets:
           - host.docker.internal:8000
+  
+  - job_name: crypto-storage-writer
+    static_configs:
+      - targets:
+          - host.docker.internal:8001

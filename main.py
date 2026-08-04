@@ -12,13 +12,14 @@ from websockets.exceptions import ConnectionClosed
 from time import perf_counter
 from exceptions import InvalidTradeMessage
 
-from metrics import (
+from metrics.collector_metrics import (
     MESSAGES_RECEIVED,
     QUEUE_SIZE,
     TRADES_PUBLISHED,
     calculate_metrics,
     observe_trade_metrics,
     start_metrics_server,
+    METRICS_PORT
 )
 
 logging.basicConfig(
@@ -175,6 +176,11 @@ async def main() -> None:
     QUEUE_SIZE.set_function(queue.qsize)
 
     start_metrics_server()
+
+    logger.info(
+        "Storage writer metrics server started: port=%s",
+        METRICS_PORT,
+    )
 
     producer = AIOKafkaProducer(
         bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,

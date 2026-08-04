@@ -2,6 +2,18 @@ import asyncio
 import logging
 import os
 
+from metrics.storage_writer_metrics import (
+    BATCH_SIZE,
+    CLICKHOUSE_INSERT_DURATION,
+    COMMIT_FAILURES,
+    INSERT_FAILURES,
+    INVALID_MESSAGES,
+    KAFKA_COMMIT_DURATION,
+    CONSUMED_MESSAGES,
+    METRICS_PORT,
+    TRADES_INSERTED,
+    start_storage_writer_metrics_server,
+)
 
 from aiokafka import AIOKafkaConsumer
 from exceptions import InvalidTradeMessage
@@ -22,7 +34,8 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
-CLICKHOUSE_PASSWORD = os.environ["CLICKHOUSE_PASSWORD"]
+#CLICKHOUSE_PASSWORD = os.environ["CLICKHOUSE_PASSWORD"] 
+CLICKHOUSE_PASSWORD="strongpassword"
 CLICKHOUSE_TABLE_NAME = "agg_trades"
 CLICKHOUSE_COLUMNS = [
     "aggregate_trade_id",
@@ -94,6 +107,7 @@ async def consume_messages(clickhouse_client) -> None:
 
             for topic_partition, messages in records_by_partition.items():
                 for message in messages:
+                    CONSUMED_MESSAGES.inc()
                     try:
                         data = parse_and_validate_kafka_message(message)
                         row = map_to_clickhouse_row(
@@ -104,6 +118,7 @@ async def consume_messages(clickhouse_client) -> None:
                         
 
                     except InvalidTradeMessage as error:
+                            INVALID_MESSAGES.inc()
                             logger.warning(
                                 "Skipping invalid Kafka message: partition=%s offset=%s error=%s",
                                 message.partition,
@@ -120,19 +135,39 @@ async def consume_messages(clickhouse_client) -> None:
                     )
 
             if batch:
-                await insert_trade_batch(
-                    clickhouse_client=clickhouse_client,
-                    batch=batch
-                )
+                BATCH_SIZE.observe(len(batch))
+                try:
+                    with CLICKHOUSE_INSERT_DURATION.time():
+                        await insert_trade_batch(
+                            clickhouse_client=clickhouse_client,
+                            batch=batch
+                        )
+                except Exception:
+                    INSERT_FAILURES.inc()
+                    raise
+
+                TRADES_INSERTED.inc(len(batch))
 
             if offsets_to_commit:
-                await consumer.commit(offsets_to_commit)
+                try:
+                    with KAFKA_COMMIT_DURATION.time():
+                        await consumer.commit(offsets_to_commit)
 
+                except Exception:
+                    COMMIT_FAILURES.inc()
+                    raise
     finally:
         await consumer.stop()
     
 
 async def main() -> None:
+    start_storage_writer_metrics_server()
+
+    logger.info(
+        "Storage writer metrics server started: port=%s",
+        METRICS_PORT,
+    )
+
     async with await clickhouse_connect.get_async_client(
         host="localhost",
         port=8123,

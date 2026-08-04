@@ -68,10 +68,10 @@ QUEUE_SIZE = Gauge(
     namespace=METRICS_NAMESPACE,
 )
 
-PIPELINE_STAGE_DURATION = Histogram(
-    "pipeline_stage_duration_seconds",
-    "Duration of collector pipeline stages",
-    labelnames=("stage",),
+PIPELINE_LATENCY = Histogram(
+   "pipeline_latency_seconds",
+    "Collector pipeline latency measurements",
+    labelnames=("measurement",),
     namespace=METRICS_NAMESPACE,
     buckets=(
         0.0001,
@@ -99,7 +99,7 @@ def start_metrics_server() -> None:
     start_http_server(METRICS_PORT)
 
 def observe_trade_metrics(metrics: TradeMetrics) -> None:
-    stage_durations = {
+    latency_measurements = {
         "trade_to_event": metrics.trade_to_event_seconds,
         "event_to_collector": metrics.event_to_collector_seconds,
         "exchange_to_collector": metrics.exchange_to_collector_seconds,
@@ -109,7 +109,7 @@ def observe_trade_metrics(metrics: TradeMetrics) -> None:
         "queue_wait": metrics.queue_wait_seconds,
     }
 
-    for stage, duration_seconds in stage_durations.items():
-        PIPELINE_STAGE_DURATION.labels(
-            stage=stage,
+    for measurement, duration_seconds in latency_measurements.items():
+        PIPELINE_LATENCY.labels(
+            measurement=measurement,
         ).observe(duration_seconds)

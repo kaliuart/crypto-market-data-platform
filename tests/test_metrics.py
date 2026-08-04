@@ -4,7 +4,7 @@ from decimal import Decimal
 import pytest
 from prometheus_client import REGISTRY
 
-from metrics import TradeMetrics, calculate_metrics, observe_trade_metrics
+from metrics.collector_metrics import TradeMetrics, calculate_metrics, observe_trade_metrics
 from models import AggregatedTradeEvent
 
 

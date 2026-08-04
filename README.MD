@@ -133,7 +133,7 @@ only after a successful ClickHouse insert.
 - no Binance backfill;
 - no formal ClickHouse deduplication strategy;
 - no storage-writer metrics;
-- no CI pipeline.
+
 
 ## Tests
 
