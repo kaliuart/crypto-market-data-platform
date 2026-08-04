@@ -90,6 +90,7 @@ services:
       - "9000:9000"
     volumes:
       - clickhouse-data:/var/lib/clickhouse
+      - ./sql/001_create_agg_trades.sql:/docker-entrypoint-initdb.d/001_create_agg_trades.sql:ro
 
 volumes:
   kafka-data:

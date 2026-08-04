@@ -3,7 +3,6 @@ import logging
 import os
 
 
-from models import ClickHouseTradeRow
 from aiokafka import AIOKafkaConsumer
 from exceptions import InvalidTradeMessage
 import clickhouse_connect
@@ -13,7 +12,7 @@ from validators import parse_and_validate_kafka_message
 KAFKA_BOOTSTRAP_SERVERS = "localhost:9092"
 KAFKA_TOPIC = "binance.aggregated-trades.v1"
 
-CONSUMER_GROUP_ID = "storage-writer-debug-v1"
+CONSUMER_GROUP_ID = "storage-writer-v1"
 
 
 logging.basicConfig(
