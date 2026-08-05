@@ -155,16 +155,15 @@ async def publish_messages(
 
     while True:
         message, received_at, queued_at = await queue.get()
-        try:
-            previous_id = await process_and_publish_message(
-                message=message,
-                producer=producer,
-                previous_id=previous_id,
-                received_at=received_at,
-                queued_at=queued_at,
-            )
-        finally:
-            queue.task_done()
+
+        previous_id = await process_and_publish_message(
+            message=message,
+            producer=producer,
+            previous_id=previous_id,
+            received_at=received_at,
+            queued_at=queued_at,
+        )
+
 
 
 async def main() -> None:
@@ -210,5 +209,8 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logger.info("Application stopped by user")
     except Exception:
+        logger.exception(
+            "Collector stopped because of an unexpected failure"
+        )
         raise SystemExit(1)
     

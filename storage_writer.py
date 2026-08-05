@@ -276,4 +276,7 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logger.info("Storage writer stopped by user")
     except Exception:
+        logger.exception(
+            "Storage writer stopped because of an unexpected failure"
+        )
         raise SystemExit(1)
