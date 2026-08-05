@@ -84,13 +84,11 @@ async def process_and_publish_message(
     try:
         data = parse_and_validate_binance_message(message)
         trade_event = create_aggregated_trade_event(data, received_at)
-        print(data)
     except InvalidTradeMessage as error:
         logger.warning(
         "Skipping invalid Binance message: %s",
         error,
         )
-
         return previous_id
      
 
@@ -101,17 +99,18 @@ async def process_and_publish_message(
     if not should_process:
         return previous_id
 
-
-
     message_bytes = serialize_aggregated_trade_event(trade_event)
     
     send_started = perf_counter()
 
-    await producer.send_and_wait(
-        topic=KAFKA_TOPIC,
-        key=trade_event.symbol.encode("utf-8"),
-        value=message_bytes,
-    )
+    try:
+        await producer.send_and_wait(
+            topic=KAFKA_TOPIC,
+            key=trade_event.symbol.encode("utf-8"),
+            value=message_bytes,
+        )
+    except Exception:
+        raise
 
     send_finished = perf_counter()
     kafka_acknowledged_at = datetime.now(UTC)
@@ -179,7 +178,7 @@ async def main() -> None:
     start_metrics_server()
 
     logger.info(
-        "Storage writer metrics server started: port=%s",
+        "Collector metrics server started: port=%s",
         METRICS_PORT,
     )
 

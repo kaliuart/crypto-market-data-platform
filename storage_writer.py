@@ -91,6 +91,110 @@ async def insert_trade_batch(
         column_names=CLICKHOUSE_COLUMNS
     )
 
+
+async def commit_offsets(
+    consumer: AIOKafkaConsumer,
+    offsets_to_commit: dict,
+) -> None:
+    try:
+        with KAFKA_COMMIT_DURATION.time():
+            await consumer.commit(offsets_to_commit)
+    except Exception:
+        COMMIT_FAILURES.inc()
+        raise
+
+
+async def flush_batch(
+    clickhouse_client,
+    consumer: AIOKafkaConsumer,
+    batch: list,
+    offsets_to_commit: dict,
+) -> None:
+    BATCH_SIZE.observe(len(batch))
+
+    try:
+        with CLICKHOUSE_INSERT_DURATION.time():
+            await insert_trade_batch(
+                clickhouse_client=clickhouse_client,
+                batch=batch,
+            )
+    except Exception:
+        INSERT_FAILURES.inc()
+        raise
+
+    TRADES_INSERTED.inc(len(batch))
+
+    await commit_offsets(
+        consumer=consumer,
+        offsets_to_commit=offsets_to_commit,
+    )
+
+def collect_records(
+    records_by_partition,
+    batch: list,
+    offsets_to_commit: dict,
+    batch_started_at: float | None,
+) -> float | None:
+    
+    for topic_partition, messages in records_by_partition.items():
+        for message in messages:
+            CONSUMED_MESSAGES.inc()
+
+            try:
+                data = parse_and_validate_kafka_message(message)
+
+                row = map_to_clickhouse_row(
+                    data=data,
+                    partition=message.partition,
+                    offset=message.offset,
+                )
+
+            except InvalidTradeMessage as error:
+                INVALID_MESSAGES.inc()
+
+                logger.warning(
+                    "Skipping invalid Kafka message: "
+                    "partition=%s offset=%s error=%s",
+                    message.partition,
+                    message.offset,
+                    error,
+                )
+                continue
+
+            if batch_started_at is None:
+                batch_started_at = time.monotonic()
+
+            batch.append(row)
+
+        offsets_to_commit[topic_partition] = (
+            messages[-1].offset + 1
+        )
+
+    return batch_started_at
+
+
+def should_flush_batch(
+    batch: list,
+    batch_started_at: float | None,
+    now: float,
+) -> bool:
+    if not batch:
+        return False
+
+    if batch_started_at is None:
+        raise RuntimeError(
+            "Non-empty batch must have batch_started_at"
+        )
+
+    batch_is_full = len(batch) >= MAX_BATCH_SIZE
+
+    batch_wait_expired = (
+        now - batch_started_at >= MAX_BATCH_WAIT_SECONDS
+    )
+
+    return batch_is_full or batch_wait_expired
+
+
 async def consume_messages(clickhouse_client) -> None:
     consumer = await start_kafka_consumer()
 
@@ -108,82 +212,37 @@ async def consume_messages(clickhouse_client) -> None:
                 max_records=remaining_capacity,
             )
 
-            for topic_partition, messages in records_by_partition.items():
-
-                for message in messages:
-                    CONSUMED_MESSAGES.inc()
-
-                    try:
-                        data = parse_and_validate_kafka_message(message)
-
-                        row = map_to_clickhouse_row(
-                            data=data,
-                            partition=message.partition,
-                            offset=message.offset
-                        )
-
-                    except InvalidTradeMessage as error:
-                            INVALID_MESSAGES.inc()
-
-                            logger.warning(
-                                "Skipping invalid Kafka message: partition=%s offset=%s error=%s",
-                                message.partition,
-                                message.offset,
-                                error,
-                            )
-                            continue
-
-                    if batch_started_at is None:
-                        batch_started_at = time.monotonic()
-
-                    batch.append(row)
-
-                offsets_to_commit[topic_partition] = (
-                        messages[-1].offset + 1
-                    )
-
-            batch_wait_expired = (
-                batch_started_at is not None 
-                and time.monotonic() - batch_started_at >= MAX_BATCH_WAIT_SECONDS
+            batch_started_at = collect_records(
+                batch=batch,
+                offsets_to_commit=offsets_to_commit,
+                batch_started_at=batch_started_at,
+                records_by_partition=records_by_partition,
             )
 
-            batch_is_full = len(batch) >= MAX_BATCH_SIZE
+            should_flush = should_flush_batch(
+                batch_started_at=batch_started_at,
+                batch=batch,
+                now=time.monotonic(),
+            )
 
-            if batch_is_full or batch_wait_expired:
-
-                BATCH_SIZE.observe(len(batch))
-                try:
-                    with CLICKHOUSE_INSERT_DURATION.time():
-                        await insert_trade_batch(
-                            clickhouse_client=clickhouse_client,
-                            batch=batch
-                        )
-
-                except Exception:
-                    INSERT_FAILURES.inc()
-                    raise
-
-                TRADES_INSERTED.inc(len(batch))
-
-                try:
-                    with KAFKA_COMMIT_DURATION.time():
-                        await consumer.commit(offsets_to_commit)
-
-                except Exception:
-                    COMMIT_FAILURES.inc()
-                    raise
+            if should_flush:
+                await flush_batch(
+                    clickhouse_client=clickhouse_client,
+                    consumer=consumer,
+                    batch=batch,
+                    offsets_to_commit=offsets_to_commit,
+                )
 
                 batch.clear()
                 offsets_to_commit.clear()
                 batch_started_at = None
 
             elif offsets_to_commit and not batch:
-                try:
-                    with KAFKA_COMMIT_DURATION.time():
-                        await consumer.commit(offsets_to_commit)
-                except Exception:
-                    COMMIT_FAILURES.inc()
-                    raise
+
+                await commit_offsets(
+                    consumer=consumer,
+                    offsets_to_commit=offsets_to_commit,
+                )
 
                 offsets_to_commit.clear()
 
