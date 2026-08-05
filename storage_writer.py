@@ -1,6 +1,7 @@
 import asyncio
 import logging
 import os
+import time
 
 from metrics.storage_writer_metrics import (
     BATCH_SIZE,
@@ -26,6 +27,9 @@ KAFKA_TOPIC = "binance.aggregated-trades.v1"
 
 CONSUMER_GROUP_ID = "storage-writer-v1"
 
+MAX_BATCH_SIZE = 100
+MAX_BATCH_WAIT_SECONDS = 2.0
+KAFKA_POLL_TIMEOUT_MS = 100
 
 logging.basicConfig(
     level=logging.INFO,
@@ -90,35 +94,37 @@ async def insert_trade_batch(
 async def consume_messages(clickhouse_client) -> None:
     consumer = await start_kafka_consumer()
 
+    batch = []
+    offsets_to_commit = {}
+    batch_started_at = None
+
     try:
         while True:
 
+            remaining_capacity = MAX_BATCH_SIZE - len(batch)
+
             records_by_partition = await consumer.getmany(
-                timeout_ms=1000,
-                max_records=100,
+                timeout_ms=KAFKA_POLL_TIMEOUT_MS,
+                max_records=remaining_capacity,
             )
 
-            if not records_by_partition:
-                continue
-
-
-            offsets_to_commit = {}
-            batch = []
-
             for topic_partition, messages in records_by_partition.items():
+
                 for message in messages:
                     CONSUMED_MESSAGES.inc()
+
                     try:
                         data = parse_and_validate_kafka_message(message)
+
                         row = map_to_clickhouse_row(
                             data=data,
                             partition=message.partition,
                             offset=message.offset
                         )
-                        print(data)
 
                     except InvalidTradeMessage as error:
                             INVALID_MESSAGES.inc()
+
                             logger.warning(
                                 "Skipping invalid Kafka message: partition=%s offset=%s error=%s",
                                 message.partition,
@@ -127,14 +133,24 @@ async def consume_messages(clickhouse_client) -> None:
                             )
                             continue
 
+                    if batch_started_at is None:
+                        batch_started_at = time.monotonic()
+
                     batch.append(row)
 
-                if messages:
-                    offsets_to_commit[topic_partition] = (
+                offsets_to_commit[topic_partition] = (
                         messages[-1].offset + 1
                     )
 
-            if batch:
+            batch_wait_expired = (
+                batch_started_at is not None 
+                and time.monotonic() - batch_started_at >= MAX_BATCH_WAIT_SECONDS
+            )
+
+            batch_is_full = len(batch) >= MAX_BATCH_SIZE
+
+            if batch_is_full or batch_wait_expired:
+
                 BATCH_SIZE.observe(len(batch))
                 try:
                     with CLICKHOUSE_INSERT_DURATION.time():
@@ -142,13 +158,13 @@ async def consume_messages(clickhouse_client) -> None:
                             clickhouse_client=clickhouse_client,
                             batch=batch
                         )
+
                 except Exception:
                     INSERT_FAILURES.inc()
                     raise
 
                 TRADES_INSERTED.inc(len(batch))
 
-            if offsets_to_commit:
                 try:
                     with KAFKA_COMMIT_DURATION.time():
                         await consumer.commit(offsets_to_commit)
@@ -156,6 +172,21 @@ async def consume_messages(clickhouse_client) -> None:
                 except Exception:
                     COMMIT_FAILURES.inc()
                     raise
+
+                batch.clear()
+                offsets_to_commit.clear()
+                batch_started_at = None
+
+            elif offsets_to_commit and not batch:
+                try:
+                    with KAFKA_COMMIT_DURATION.time():
+                        await consumer.commit(offsets_to_commit)
+                except Exception:
+                    COMMIT_FAILURES.inc()
+                    raise
+
+                offsets_to_commit.clear()
+
     finally:
         await consumer.stop()
     
