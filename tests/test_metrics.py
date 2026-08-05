@@ -75,7 +75,7 @@ def test_calculate_metrics_returns_float_values() -> None:
     )
 
 
-def test_observe_trade_metrics_records_each_pipeline_stage() -> None:
+def test_observe_trade_metrics_records_each_pipeline_measurement() -> None:
     metrics = TradeMetrics(
         trade_to_event_seconds=0.001,
         event_to_collector_seconds=0.120,
@@ -96,34 +96,36 @@ def test_observe_trade_metrics_records_each_pipeline_stage() -> None:
         "queue_wait": 0.002,
     }
 
+    metric_name = "crypto_collector_pipeline_latency_seconds"
+
     before = {
-        stage: (
+        measurement: (
             REGISTRY.get_sample_value(
-                "crypto_collector_pipeline_stage_duration_seconds_count",
-                {"stage": stage},
+                f"{metric_name}_count",
+                {"measurement": measurement},
             )
             or 0.0,
             REGISTRY.get_sample_value(
-                "crypto_collector_pipeline_stage_duration_seconds_sum",
-                {"stage": stage},
+                f"{metric_name}_sum",
+                {"measurement": measurement},
             )
             or 0.0,
         )
-        for stage in expected_durations
+        for measurement in expected_durations
     }
 
     observe_trade_metrics(metrics)
 
-    for stage, expected_duration in expected_durations.items():
-        count_before, sum_before = before[stage]
+    for measurement, expected_duration in expected_durations.items():
+        count_before, sum_before = before[measurement]
 
         count_after = REGISTRY.get_sample_value(
-            "crypto_collector_pipeline_stage_duration_seconds_count",
-            {"stage": stage},
+            f"{metric_name}_count",
+            {"measurement": measurement},
         )
         sum_after = REGISTRY.get_sample_value(
-            "crypto_collector_pipeline_stage_duration_seconds_sum",
-            {"stage": stage},
+            f"{metric_name}_sum",
+            {"measurement": measurement},
         )
 
         assert count_after == pytest.approx(count_before + 1)
