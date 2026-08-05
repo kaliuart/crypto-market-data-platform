@@ -103,14 +103,12 @@ async def process_and_publish_message(
     
     send_started = perf_counter()
 
-    try:
-        await producer.send_and_wait(
-            topic=KAFKA_TOPIC,
-            key=trade_event.symbol.encode("utf-8"),
-            value=message_bytes,
+    await producer.send_and_wait(
+        topic=KAFKA_TOPIC,
+        key=trade_event.symbol.encode("utf-8"),
+        value=message_bytes,
         )
-    except Exception:
-        raise
+
 
     send_finished = perf_counter()
     kafka_acknowledged_at = datetime.now(UTC)
@@ -212,6 +210,5 @@ if __name__ == "__main__":
     except KeyboardInterrupt:
         logger.info("Application stopped by user")
     except Exception:
-        logger.exception("Collector stopped because of infrastructure failure")
-        raise
+        raise SystemExit(1)
     
