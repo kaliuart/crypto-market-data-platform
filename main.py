@@ -46,8 +46,12 @@ BINANCE_WS_URL = (
     f"?streams={BINANCE_STREAMS}"
 )
 
+KAFKA_TRANSACTIONAL_ID = "binance-collector-v1"
+
 KAFKA_BOOTSTRAP_SERVERS = "127.0.0.1:9092"
+
 KAFKA_TOPIC = "binance.aggregated-trades.v1"
+KAFKA_STATE_TOPIC = "collector.sequence-state.v1"
 
 QUEUE_MAX_SIZE = 1000
 QueueItem = tuple[str, datetime, float]
@@ -116,7 +120,7 @@ def prepare_batch(
     previous_ids: dict[str, int],
 ) -> tuple[list[PreparedMessage], dict[str, int]]:
 
-    candidate_ids = previous_ids.copy()
+    candidate_ids: dict[str, int] = {}
     prepared_messages: list[PreparedMessage] = []
 
     for message, received_at, queued_at in batch:
@@ -128,6 +132,7 @@ def prepare_batch(
                 data=data,
                 received_at=received_at
             )
+            print(data)
 
         except InvalidTradeMessage as error:
             logger.warning(
@@ -137,8 +142,13 @@ def prepare_batch(
             continue
 
         symbol = trade_event.symbol
+
+        if symbol in candidate_ids:
+            previous_id = candidate_ids.get(symbol)
+        else:
+            previous_id = previous_ids.get(symbol)
+
         current_id = trade_event.aggregate_trade_id
-        previous_id = candidate_ids.get(symbol)
 
         next_previous_id, should_process = check_trade_sequence(
             previous_id=previous_id,
@@ -178,25 +188,38 @@ async def process_and_publish_message(
         return
     
     send_started = perf_counter()
-    delivery_futures = []
 
-    for prepared_message in prepared_messages:
+    async with producer.transaction():
 
-        future = await producer.send(
-            topic=KAFKA_TOPIC,
-            key=prepared_message.trade_event.symbol.encode("utf-8"),
-            value=prepared_message.message_bytes,
-        )
+        delivery_futures = []
 
-        delivery_futures.append(future)
+        for prepared_message in prepared_messages:
+            
+            future = await producer.send(
+                topic=KAFKA_TOPIC,
+                key=prepared_message.trade_event.symbol.encode("utf-8"),
+                value=prepared_message.message_bytes,
+            )
+            delivery_futures.append(future)
 
-    await asyncio.gather(*delivery_futures)
+        for symbol, last_id in candidate_ids.items():
 
+            future = await producer.send(
+                topic=KAFKA_STATE_TOPIC,
+                key=symbol.encode("utf-8"),
+                value=str(last_id).encode("utf-8"),
+            )
+
+            delivery_futures.append(future)
+
+        await asyncio.gather(*delivery_futures)
+
+    previous_ids.update(candidate_ids)
 
     send_finished = perf_counter()
     kafka_acknowledged_at = datetime.now(UTC)
-    previous_ids.update(candidate_ids)
-    
+
+
 """
     metrics = calculate_metrics(
         trade_event, 
@@ -268,6 +291,7 @@ async def main() -> None:
     producer = AIOKafkaProducer(
         bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
         enable_idempotence=True,
+        transactional_id=KAFKA_TRANSACTIONAL_ID,
         )
     
     try:

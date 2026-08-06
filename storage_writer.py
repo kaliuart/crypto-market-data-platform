@@ -184,6 +184,7 @@ async def consume_messages(clickhouse_client) -> None:
         group_id=CONSUMER_GROUP_ID,
         enable_auto_commit=False,
         auto_offset_reset="earliest",
+        isolation_level="read_committed",
     )
 
     try:
