@@ -126,14 +126,11 @@ only after a successful ClickHouse insert.
 
 ## Current limitations
 
-- one Binance symbol;
 - one Kafka broker;
 - applications run outside Docker;
 - no dead-letter queue;
 - no Binance backfill;
 - no formal ClickHouse deduplication strategy;
-- no storage-writer metrics;
-
 
 ## Tests
 

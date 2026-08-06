@@ -30,3 +30,10 @@ class ClickHouseTradeRow:
     received_at: datetime
     kafka_partition: int
     kafka_offset: int
+
+@dataclass(frozen=True)
+class PreparedMessage:
+    message_bytes: bytes
+    trade_event: AggregatedTradeEvent
+    queued_at: float
+    processing_started: float
