@@ -90,8 +90,6 @@ def test_flush_batch_inserts_before_commit(
 def test_flush_batch_does_not_commit_when_insert_fails(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    commit_called = False
-
     async def failing_insert_trade_batch(
         *,
         clickhouse_client,

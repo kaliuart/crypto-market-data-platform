@@ -1,17 +1,11 @@
-from prometheus_client import Counter, Histogram, start_http_server
+from prometheus_client import (
+    Counter,
+    Histogram,
+    start_http_server,
+)
 
 METRICS_PORT = 8001
 METRICS_NAMESPACE = "crypto_storage_writer"
-
-"""messages_consumed_total
-invalid_messages_total
-trades_inserted_total
-insert_failures_total
-commit_failures_total
-batch_size
-clickhouse_insert_duration_seconds
-kafka_commit_duration_seconds"""
-
 
 CONSUMED_MESSAGES = Counter(
     "messages_consumed",

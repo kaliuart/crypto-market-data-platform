@@ -7,10 +7,10 @@ from metrics.storage_writer_metrics import (
     BATCH_SIZE,
     CLICKHOUSE_INSERT_DURATION,
     COMMIT_FAILURES,
+    CONSUMED_MESSAGES,
     INSERT_FAILURES,
     INVALID_MESSAGES,
     KAFKA_COMMIT_DURATION,
-    CONSUMED_MESSAGES,
     METRICS_PORT,
     TRADES_INSERTED,
     start_storage_writer_metrics_server,
@@ -22,7 +22,7 @@ import clickhouse_connect
 from mappers import (map_to_clickhouse_row, row_to_clickhouse_values)
 from validators import parse_and_validate_kafka_message
 
-KAFKA_BOOTSTRAP_SERVERS = "localhost:9092"
+KAFKA_BOOTSTRAP_SERVERS = "127.0.0.1:9092"
 KAFKA_TOPIC = "binance.aggregated-trades.v1"
 
 CONSUMER_GROUP_ID = "storage-writer-v1"
@@ -55,25 +55,6 @@ CLICKHOUSE_COLUMNS = [
     "kafka_partition",
     "kafka_offset",
 ]
-
-async def start_kafka_consumer() -> AIOKafkaConsumer:
-
-    consumer = AIOKafkaConsumer(
-        KAFKA_TOPIC,
-        bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
-        group_id=CONSUMER_GROUP_ID,
-        enable_auto_commit=False,
-        auto_offset_reset="earliest",
-    )
-
-    await consumer.start()
-
-    logger.info(
-        "Kafka consumer started: topic=%s group=%s",
-        KAFKA_TOPIC,
-        CONSUMER_GROUP_ID,
-    )
-    return consumer
 
 
 async def insert_trade_batch(
@@ -148,6 +129,7 @@ def collect_records(
                     partition=message.partition,
                     offset=message.offset,
                 )
+                print(data)
 
             except InvalidTradeMessage as error:
                 INVALID_MESSAGES.inc()
@@ -196,13 +178,27 @@ def should_flush_batch(
 
 
 async def consume_messages(clickhouse_client) -> None:
-    consumer = await start_kafka_consumer()
-
-    batch = []
-    offsets_to_commit = {}
-    batch_started_at = None
+    consumer = AIOKafkaConsumer(
+        KAFKA_TOPIC,
+        bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
+        group_id=CONSUMER_GROUP_ID,
+        enable_auto_commit=False,
+        auto_offset_reset="earliest",
+    )
 
     try:
+        await consumer.start()
+
+        logger.info(
+            "Kafka consumer started: topic=%s group=%s",
+            KAFKA_TOPIC,
+            CONSUMER_GROUP_ID,
+        )
+
+        batch = []
+        offsets_to_commit = {}
+        batch_started_at = None
+
         while True:
 
             remaining_capacity = MAX_BATCH_SIZE - len(batch)
@@ -259,7 +255,7 @@ async def main() -> None:
     )
 
     async with await clickhouse_connect.get_async_client(
-        host="localhost",
+        host="127.0.0.1",
         port=8123,
         username="default",
         password=CLICKHOUSE_PASSWORD,

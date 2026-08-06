@@ -4,9 +4,11 @@ from exceptions import InvalidTradeMessage
 from validators import parse_and_validate_binance_message
 
 
-def test_valid_aggregated_trade_returns_dictionary():
+def test_valid_combined_trade_returns_inner_data():
     message = (
-        '{"E": 1785161328336, '
+        '{"stream": "btcusdt@aggTrade", '
+        '"data": {'
+        '"E": 1785161328336, '
         '"s": "BTCUSDT", '
         '"a": 4023160398, '
         '"p": "65340.00000000", '
@@ -14,7 +16,8 @@ def test_valid_aggregated_trade_returns_dictionary():
         '"f": 6536456692, '
         '"l": 6536456693, '
         '"T": 1785161328335, '
-        '"m": true}'
+        '"m": true'
+        '}}'
     )
 
     data = parse_and_validate_binance_message(message)
@@ -22,19 +25,33 @@ def test_valid_aggregated_trade_returns_dictionary():
     assert isinstance(data, dict)
     assert data["a"] == 4023160398
     assert data["s"] == "BTCUSDT"
+    assert "stream" not in data
+    assert "data" not in data
 
 
 def test_invalid_json_raises_invalid_trade_message():
-    message = '{"E": 1785161328336,'
+    message = '{"stream": "btcusdt@aggTrade", "data":'
 
     with pytest.raises(InvalidTradeMessage):
         parse_and_validate_binance_message(message)
 
 
-def test_missing_required_field_raises_invalid_trade_message():
+def test_missing_trade_field_raises_invalid_trade_message():
     message = (
-        '{"E": 1785161328336, '
-        '"s": "BTCUSDT"}'
+        '{"stream": "btcusdt@aggTrade", '
+        '"data": {'
+        '"E": 1785161328336, '
+        '"s": "BTCUSDT"'
+        '}}'
+    )
+
+    with pytest.raises(InvalidTradeMessage):
+        parse_and_validate_binance_message(message)
+
+
+def test_missing_data_raises_invalid_trade_message():
+    message = (
+        '{"stream": "btcusdt@aggTrade"}'
     )
 
     with pytest.raises(InvalidTradeMessage):

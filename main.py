@@ -30,10 +30,22 @@ logging.basicConfig(
 
 logger = logging.getLogger(__name__)
 
+BINANCE_SYMBOLS = (
+    "BTCUSDT",
+    "ETHUSDT",
+    "BNBUSDT",
+)
+BINANCE_STREAMS = "/".join(
+    f"{symbol.lower()}@aggTrade"
+    for symbol in BINANCE_SYMBOLS
+)
 
-BINANCE_WS_URL = "wss://stream.binance.com:9443/ws/btcusdt@aggTrade"
+BINANCE_WS_URL = (
+    "wss://stream.binance.com:9443/stream"
+    f"?streams={BINANCE_STREAMS}"
+)
 
-KAFKA_BOOTSTRAP_SERVERS = "localhost:9092"
+KAFKA_BOOTSTRAP_SERVERS = "127.0.0.1:9092"
 KAFKA_TOPIC = "binance.aggregated-trades.v1"
 
 QUEUE_MAX_SIZE = 1000
@@ -74,30 +86,35 @@ def check_trade_sequence(
 async def process_and_publish_message(
     message: str,
     producer: AIOKafkaProducer,
-    previous_id: int | None,
+    previous_ids: dict[str, int],
     received_at: datetime,
     queued_at: float
-) -> int | None:    
+) -> None:    
 
     processing_started = perf_counter()
 
     try:
         data = parse_and_validate_binance_message(message)
         trade_event = create_aggregated_trade_event(data, received_at)
+        print(data)
     except InvalidTradeMessage as error:
         logger.warning(
         "Skipping invalid Binance message: %s",
         error,
         )
-        return previous_id
+        return 
      
-
+    symbol = trade_event.symbol
+    previous_id = previous_ids.get(symbol)
     current_id = trade_event.aggregate_trade_id
     
-    next_previous_id, should_process = check_trade_sequence(previous_id, current_id,)
+    next_previous_id, should_process = check_trade_sequence(
+        previous_id, 
+        current_id,
+    )
                 
     if not should_process:
-        return previous_id
+        return 
 
     message_bytes = serialize_aggregated_trade_event(trade_event)
     
@@ -105,7 +122,7 @@ async def process_and_publish_message(
 
     await producer.send_and_wait(
         topic=KAFKA_TOPIC,
-        key=trade_event.symbol.encode("utf-8"),
+        key=symbol.encode("utf-8"),
         value=message_bytes,
         )
 
@@ -125,13 +142,16 @@ async def process_and_publish_message(
     TRADES_PUBLISHED.inc()
     observe_trade_metrics(metrics)
 
-    return next_previous_id
+    previous_ids[symbol] = next_previous_id
 
 async def receive_messages(
         queue: asyncio.Queue[QueueItem]
 ) -> None:
     async for websocket in connect(BINANCE_WS_URL):
-        logger.info("Connected to Binance WebSocket")
+        logger.info(
+            "Connected to Binance WebSocket: symbols=%s",
+            ",".join(BINANCE_SYMBOLS),
+        )
 
         try:
             async for message in websocket:
@@ -151,15 +171,15 @@ async def publish_messages(
         queue: asyncio.Queue[QueueItem],
         producer: AIOKafkaProducer,
 ) -> None:
-    previous_id: int | None = None
+    previous_ids: dict[str, int] = {}
 
     while True:
         message, received_at, queued_at = await queue.get()
 
-        previous_id = await process_and_publish_message(
+        await process_and_publish_message(
             message=message,
             producer=producer,
-            previous_id=previous_id,
+            previous_ids=previous_ids,
             received_at=received_at,
             queued_at=queued_at,
         )
@@ -183,10 +203,10 @@ async def main() -> None:
         bootstrap_servers=KAFKA_BOOTSTRAP_SERVERS,
         enable_idempotence=True,
         )
-
-    await producer.start()
     
     try:
+        await producer.start()
+
         async with asyncio.TaskGroup() as task_group:
 
             task_group.create_task(

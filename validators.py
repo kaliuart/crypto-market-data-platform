@@ -3,6 +3,8 @@ from jsonschema import Draft202012Validator
 from jsonschema.exceptions import ValidationError
 import json
 from exceptions import InvalidTradeMessage
+
+
 AGGREGATED_TRADE_SCHEMA_BINANCE = {
     "type": "object",
     "properties": {
@@ -101,17 +103,39 @@ AGGREGATED_TRADE_SCHEMA_KAFKA = {
     ],
 }
 
+BINANCE_COMBINED_STREAM_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "stream": {
+            "type": "string",
+            "minLength": 1,
+        },
+        "data": AGGREGATED_TRADE_SCHEMA_BINANCE,
+    },
+    "required": [
+        "stream",
+        "data",
+    ],
+}
+
 AGGREGATED_TRADE_VALIDATOR_BINANCE  = Draft202012Validator(AGGREGATED_TRADE_SCHEMA_BINANCE)
 AGGREGATED_TRADE_VALIDATOR_KAFKA  = Draft202012Validator(AGGREGATED_TRADE_SCHEMA_KAFKA)
+BINANCE_COMBINED_STREAM_VALIDATOR = Draft202012Validator(BINANCE_COMBINED_STREAM_SCHEMA)
+
 
 def parse_and_validate_binance_message(
     message: str,
 ) -> dict:
 
     try:
-        data = json.loads(message)
-        AGGREGATED_TRADE_VALIDATOR_BINANCE.validate(data)
-        return data
+        payload = json.loads(message)
+
+        BINANCE_COMBINED_STREAM_VALIDATOR.validate(
+            payload
+        )
+
+        return payload["data"]
+
     except (json.JSONDecodeError, ValidationError) as error:
         raise InvalidTradeMessage(f"Invalid Binance message: {error}") from error
 
